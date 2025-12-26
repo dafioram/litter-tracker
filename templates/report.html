@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vet Report - {{ cat }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #333; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid {{ cat_color }}; padding-bottom: 10px; margin-bottom: 20px; }
+        h1 { margin: 0; font-size: 24px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+        .stat-box { border: 1px solid #ccc; padding: 15px; border-radius: 5px; text-align: center; }
+        .stat-val { font-size: 24px; font-weight: bold; margin: 5px 0; }
+        .stat-label { font-size: 14px; color: #666; text-transform: uppercase; }
+        .chart-section { margin-bottom: 30px; page-break-inside: avoid; }
+        .chart-container { position: relative; height: 250px; width: 100%; border: 1px solid #eee; }
+        .flags-section { border-top: 2px solid #333; padding-top: 10px; }
+        .flag { color: #d9534f; margin-bottom: 5px; font-weight: bold; }
+        
+        @media print {
+            body { -webkit-print-color-adjust: exact; font-size: 12pt; }
+            .no-print { display: none; }
+            .chart-container { height: 220px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div>
+            <h1>Health Report: {{ cat }}</h1>
+            <div style="color:#666; margin-top:5px;">Generated: {{ generated_date }}</div>
+        </div>
+        <div class="no-print">
+            <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer; background: #eee; border:1px solid #999;">🖨️ Print to PDF</button>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-val">{{ stats.current_weight }}</div>
+            <div class="stat-label">Current Weight</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-val">{{ stats.avg_visits }}</div>
+            <div class="stat-label">Avg Visits / Day</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-val">{{ stats.age }}</div>
+            <div class="stat-label">Age</div>
+        </div>
+    </div>
+
+    <div class="chart-section">
+        <h3>Weight History (1 Year)</h3>
+        <div class="chart-container">
+            <canvas id="weightChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-section">
+        <h3>Visit Frequency (30 Days)</h3>
+        <div class="chart-container">
+            <canvas id="freqChart"></canvas>
+        </div>
+    </div>
+
+    {% if flags %}
+    <div class="flags-section">
+        <h3>⚠️ Health Alerts (Last 30 Days)</h3>
+        {% for flag in flags %}
+            <div class="flag">{{ flag }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <script>
+        const catColor = "{{ cat_color }}";
+
+        // Weight Chart
+        new Chart(document.getElementById('weightChart'), {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Weight (lbs)',
+                    data: {{ weight_data | safe }},
+                    borderColor: catColor,
+                    backgroundColor: catColor,
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    tension: 0.1,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'time', time: { unit: 'month' } },
+                    y: { title: { display: true, text: 'lbs' } }
+                }
+            }
+        });
+
+        // Frequency Chart
+        new Chart(document.getElementById('freqChart'), {
+            type: 'bar',
+            data: {
+                labels: {{ freq_labels | safe }},
+                datasets: [{
+                    label: 'Visits',
+                    data: {{ freq_values | safe }},
+                    backgroundColor: catColor,
+                    opacity: 0.8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    </script>
+</body>
+</html>

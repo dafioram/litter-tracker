@@ -1,0 +1,56 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <h3 style="margin:0;">✏️ Data Editor: {{ current_date }}</h3>
+        <div>
+            <a href="/editor?date={{ prev_date }}" class="btn btn-gray">&larr; Prev</a>
+            <a href="/editor?date={{ next_date }}" class="btn btn-gray">Next &rarr;</a>
+        </div>
+    </div>
+
+    <div style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Weight</th>
+                    <th>Identity</th>
+                    <th>Activity / Metadata</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in logs %}
+                <tr style="{{ 'background:#fff3cd' if 'Blacklisted' in row.cat_identity else '' }}">
+                    <td>{{ row.time }}</td>
+                    <td>{{ row.weight }}</td>
+                    <td>
+                        <span style="padding:2px 6px; border-radius:4px; background: #eee;">
+                            {{ row.cat_identity }}
+                        </span>
+                    </td>
+                    <td>{{ row.activity }}</td>
+                    <td>
+                        {% if row.cat_identity == 'Blacklisted' %}
+                            <a href="/fix/{{ row.timestamp }}/restore" class="btn btn-green">Restore</a>
+                        {% else %}
+                            
+                            {% for cat in profiles %}
+                                {% if row.cat_identity != cat.name %}
+                                <a href="/fix/{{ row.timestamp }}/{{ cat.name }}" class="btn" style="background-color: {{ cat.color_hex }}; color:white; opacity: 0.8; font-size: 0.75em;">
+                                    {{ cat.name }}
+                                </a>
+                                {% endif %}
+                            {% endfor %}
+                            <a href="/fix/{{ row.timestamp }}/blacklist" class="btn btn-gray" title="Ignore this entry">🚫</a>
+                            <a href="/fix/{{ row.timestamp }}/delete" class="btn btn-red" onclick="return confirm('Permanently Delete?');" title="Delete">✕</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

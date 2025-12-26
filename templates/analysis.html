@@ -1,0 +1,185 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<style>
+    /* Desktop Default: Fixed height */
+    .chart-container { position: relative; height: 400px; width: 100%; }
+    /* Mobile Overrides */
+    @media (max-width: 768px) {
+        .chart-container { height: 60vh; min-height: 350px; }
+    }
+    .card { margin-bottom: 25px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    h3 { margin-top: 0; color: #333; }
+</style>
+
+<div class="card">
+    <h3>📈 Weight Trends</h3>
+    <div class="chart-container"><canvas id="weightChart"></canvas></div>
+</div>
+
+<div class="card">
+    <h3>🕒 Daily Habits (Time of Day)</h3>
+    <div class="chart-container"><canvas id="scatterChart"></canvas></div>
+</div>
+
+<div class="card">
+    <h3>🚽 Visit Frequency</h3>
+    <div class="chart-container"><canvas id="freqChart"></canvas></div>
+</div>
+
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">⏳ Dwell Time (Duration)</h3>
+        <div style="font-size:0.85em; display:flex; gap:15px; align-items:center;">
+            <div style="display:flex; align-items:center; gap:5px;">
+                <span style="width:12px; height:3px; background:rgba(255, 205, 86, 0.8); display:inline-block;"></span>
+                <span>Solid Waste (>2m)</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:5px;">
+                <span style="width:12px; height:3px; background:rgba(255, 99, 132, 0.8); display:inline-block;"></span>
+                <span>Extended/Health Risk (>5m)</span>
+            </div>
+        </div>
+    </div>
+    <p style="color:#666; font-size:0.9em; margin-top:5px;">
+        Most "Number 1" visits are under 2 minutes. Long durations may indicate constipation or cleaning.
+    </p>
+    <div class="chart-container"><canvas id="dwellChart"></canvas></div>
+</div>
+
+<div class="card">
+    <h3>⚙️ Machine Health</h3>
+    <div class="chart-container"><canvas id="machineChart"></canvas></div>
+</div>
+
+<script>
+    const commonTimeScale = {
+        type: 'time',
+        time: { unit: 'day', tooltipFormat: 'MMM d', displayFormats: { day: 'MMM d' } },
+        title: { display: true, text: 'Date' }
+    };
+
+    // 1. WEIGHT CHART
+    const weightData = {{ weight_data | safe }};
+    if (weightData) {
+        new Chart(document.getElementById('weightChart'), {
+            type: 'line',
+            data: weightData, // Colors are already inside weightData from app.py
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'time', time: { unit: 'day' } },
+                    y: { title: { display: true, text: 'Weight (lbs)' } }
+                }
+            }
+        });
+    }
+
+    // 2. SCATTER CHART
+    const scatterData = {{ scatter_data | safe }};
+    if (scatterData) {
+        new Chart(document.getElementById('scatterChart'), {
+            type: 'scatter',
+            data: scatterData,
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: commonTimeScale,
+                    y: { 
+                        type: 'linear', min: 0, max: 24, reverse: true,
+                        title: { display: true, text: 'Time of Day' },
+                        ticks: { stepSize: 3, callback: v => {
+                            const h = Math.floor(v);
+                            const ampm = h >= 12 ? 'PM' : 'AM';
+                            const h12 = h % 12 || 12;
+                            return h12 + ' ' + ampm;
+                        }}
+                    }
+                }
+            }
+        });
+    }
+
+    // 3. FREQUENCY CHART
+    const freqData = {{ freq_data | safe }};
+    if (freqData) {
+        new Chart(document.getElementById('freqChart'), {
+            type: 'bar',
+            data: freqData,
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    }
+
+	// 4. DWELL CHART
+    const dwellData = {{ dwell_data | safe }};
+    if (dwellData) {
+        new Chart(document.getElementById('dwellChart'), {
+            type: 'scatter',
+            data: dwellData,
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: commonTimeScale,
+                    y: { title: { display: true, text: 'Minutes' }, min: 0 }
+                },
+                plugins: {
+                    annotation: {
+                        annotations: {
+                            // LINE 1: LIQUID VS SOLID
+                            solidLine: {
+                                type: 'line', 
+                                yMin: 2, yMax: 2, 
+                                borderColor: 'rgba(255, 205, 86, 0.6)', 
+                                borderWidth: 3, 
+                                borderDash: [10, 5],
+                                label: { 
+                                    content: 'Solid Waste Threshold', 
+                                    enabled: true, 
+                                    position: 'start', 
+                                    backgroundColor: 'rgba(255,205,86,0.7)', 
+                                    color:'black',
+                                    font: { size: 10 }
+                                }
+                            },
+                            // LINE 2: HEALTH RISK
+                            riskLine: {
+                                type: 'line', 
+                                yMin: 5, yMax: 5, 
+                                borderColor: 'rgba(255, 99, 132, 0.8)', 
+                                borderWidth: 2,
+                                label: { 
+                                    content: 'Extended Duration Alert', 
+                                    enabled: true, 
+                                    position: 'end', 
+                                    backgroundColor: 'rgba(255,99,132,0.8)',
+                                    color: 'white',
+                                    font: { size: 10, weight: 'bold' }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // 5. MACHINE CHART
+    const machineData = {{ machine_data | safe }};
+    if (machineData) {
+        new Chart(document.getElementById('machineChart'), {
+            type: 'line',
+            data: machineData,
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: commonTimeScale,
+                    y: { title: { display: true, text: 'Minutes' }, min: 0, max: 6 }
+                }
+            }
+        });
+    }
+</script>
+{% endblock %}

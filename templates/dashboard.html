@@ -1,0 +1,154 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0;">⚙️ Manage Cat Profiles</h3>
+        <button onclick="document.getElementById('addCatForm').style.display = document.getElementById('addCatForm').style.display === 'none' ? 'block' : 'none'" class="btn btn-blue">
+            + Add New Cat
+        </button>
+    </div>
+    
+    <div id="addCatForm" style="display:none; margin-top:15px; background:#f8f9fa; padding:15px; border-radius:8px;">
+        <form action="/manage_cats" method="post" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+            <input type="hidden" name="action" value="add">
+            <div>
+                <label style="font-size:0.8em; display:block;">Name</label>
+                <input type="text" name="name" placeholder="Name" required style="padding:5px; width:100px;">
+            </div>
+            <div>
+                <label style="font-size:0.8em; display:block;">Target Weight</label>
+                <input type="number" step="0.1" name="weight" placeholder="lbs" required style="padding:5px; width:60px;">
+            </div>
+            <div> <label style="font-size:0.8em; display:block;">Birthday (Optional)</label>
+                <input type="date" name="birthday" style="padding:4px; width:130px;">
+            </div>
+            <div>
+                <label style="font-size:0.8em; display:block;">Color</label>
+                <input type="color" name="color" value="#36a2eb" style="padding:0; width:40px; height:30px; border:none;">
+            </div>
+            <button type="submit" class="btn btn-green">Save</button>
+        </form>
+    </div>
+</div>
+
+{% if data_age > 15 %}
+<div class="alert {{ 'error' if age_status == 'danger' else 'warning' }}">
+    ⚠️ <strong>Data is {{ data_age }} days old!</strong> 
+</div>
+{% endif %}
+
+{% if review_count > 0 %}
+<div class="alert warning" style="background:#ffc107; color:#333; cursor:pointer;" onclick="window.location.href='/review'">
+    <a href="/review" style="color:inherit; text-decoration:none; display:block;">
+        ⚠️ <strong>Action Required:</strong> {{ review_count }} entries need review &rarr;
+    </a>
+</div>
+{% endif %}
+
+{% if profiles %}
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+            <div>
+                <h3 style="margin:0;">📤 Sync Data</h3>
+                <div style="color:#666; font-size:0.9em; margin-top:5px;">
+                    {% if last_entry %}
+                    Last activity: <strong>{{ last_entry.date }}</strong> at {{ last_entry.time }}
+                    {% else %}
+                    No data yet. Upload your first CSV.
+                    {% endif %}
+                </div>
+            </div>
+            <form action="/upload" method="post" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:center;">
+                <input type="file" name="file" accept=".csv" required style="padding:5px;">
+                <button type="submit" class="btn btn-blue" style="border:none; cursor:pointer; font-size:1em;">
+                    📤 Whisker CSV Import
+                </button>
+            </form>
+        </div>
+    </div>
+{% else %}
+    <div class="card" style="border: 2px dashed #ccc; background-color: #f9f9f9; text-align: center; padding: 30px; opacity: 0.7;">
+        <h3 style="color:#777; margin:0;">🚫 Upload Locked</h3>
+        <p style="color:#888; margin-top:10px;">
+            Please add a <strong>Cat Profile</strong> above to enable data uploading.
+        </p>
+    </div>
+{% endif %}
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+    
+    {% if trends %}
+        {% for cat_name, data in trends.items() %}
+        <div class="card" style="display:flex; flex-direction:column; justify-content:space-between; border-top: 4px solid {{ data.color }};">
+            <div style="border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0; color:#333;">{{ cat_name }}</h3>
+                
+                <form action="/manage_cats" method="post" onsubmit="return confirm('Delete {{ cat_name }}?');">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="name" value="{{ cat_name }}">
+                    <button type="submit" style="background:none; border:none; color:#999; cursor:pointer; font-size:1.2em;">&times;</button>
+                </form>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:20px;">
+                <div>
+                    <div style="font-size: 2.5em; font-weight: 800; color:#333; line-height:1;">
+                        {{ data.current }} <span style="font-size:0.4em; color:#999; font-weight:normal;">lbs</span>
+                    </div>
+                    <small style="color:#666;">Target: {{ data.target }} lbs</small>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size: 1.1em; font-weight:bold; color: #555;">
+                        {{ data.age_str }}
+                    </div>
+                    <small style="color:#666;">Age</small>
+                </div>
+            </div>
+
+            <div style="background:#f8f9fa; border-radius:8px; padding:15px; display:flex; justify-content:space-between; margin-bottom: 15px;">
+                <div style="text-align:center; width:50%;">
+                    <div style="font-weight:bold; font-size:1.1em;">{{ data.avg_daily }}</div>
+                    <div style="font-size:0.75em; color:#666; text-transform:uppercase; margin-top:2px;">Visits/Day</div>
+                </div>
+                <div style="text-align:center; width:50%; border-left:1px solid #ddd;">
+                    <div style="font-weight:bold; font-size:1.1em;">{{ data.visits_total }}</div>
+                    <div style="font-size:0.75em; color:#666; text-transform:uppercase; margin-top:2px;">Total (30d)</div>
+                </div>
+            </div>
+
+            <div style="text-align:center;">
+                <a href="/report?cat={{ cat_name }}" target="_blank" style="display:block; width:100%; padding:8px 0; background:#f0f0f0; border-radius:4px; color:#333; text-decoration:none; font-weight:bold; font-size:0.9em; border:1px solid #ddd;">
+                    📄 Generate Vet Report
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="card" style="text-align:center; padding:40px;">
+            <h3 style="color:#999;">No Cat Profiles</h3>
+        </div>
+    {% endif %}
+
+    <div class="card" style="border-top: 4px solid #ffcd56;">
+        <h3 style="margin-top:0;">🤖 Robot Status</h3>
+        <div style="display:flex; justify-content:space-around; text-align:center; margin-top:20px;">
+            <div>
+                <div style="font-size:1.8em; font-weight:bold; color:#333;">{{ cycle_count }}</div>
+                <div style="font-size:0.8em; color:#666;">Cycles</div>
+            </div>
+            <div>
+                <div style="font-size:1.8em; font-weight:bold; color:{{ 'orange' if interrupt_count > 5 else '#333' }};">{{ interrupt_count }}</div>
+                <div style="font-size:0.8em; color:#666;">Interrupts</div>
+            </div>
+            <div>
+                <div style="font-size:1.8em; font-weight:bold; color:#333;">{{ bags_used }}</div>
+                <div style="font-size:0.8em; color:#666;">Bags</div>
+            </div>
+        </div>
+        <div style="margin-top:15px; text-align:center;">
+             <a href="/analysis" style="color:#007bff; text-decoration:none; font-size:0.9em;">View Health Charts &rarr;</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

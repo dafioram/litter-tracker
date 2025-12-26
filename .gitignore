@@ -1,0 +1,11 @@
+# Ignore Database and Backups
+data
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore Environment Secrets
+.env
+venv/
+.DS_Store

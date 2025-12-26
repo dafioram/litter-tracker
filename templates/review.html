@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3>⚠️ Quality Control</h3>
+        {% if logs %}<span class="btn btn-red">{{ logs|length }} Issues</span>{% endif %}
+    </div>
+    
+    {% if not logs %}
+        <div style="text-align:center; padding:40px; color:green;">
+            <h3>✨ All Clean!</h3>
+            <p>No errors or unknowns found.</p>
+        </div>
+    {% else %}
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Weight</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                        <th>Assign To...</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in logs %}
+                    <tr>
+                        <td>{{ row.date }}<br><small>{{ row.time }}</small></td>
+                        <td><strong>{{ row.weight }}</strong></td>
+                        <td><span style="background:#ffeeba; padding:2px 6px; border-radius:4px;">{{ row.cat_identity }}</span></td>
+                        <td style="color:#dc3545;">{{ row.flag_reason }}</td>
+                        <td>
+                            {% for cat in profiles %}
+                            <a href="/fix/{{ row.timestamp }}/{{ cat.name }}" class="btn" style="background-color: {{ cat.color_hex }}; color:white;">
+                                {{ cat.name }}
+                            </a>
+                            {% endfor %}
+                            
+                            <a href="/fix/{{ row.timestamp }}/blacklist" class="btn btn-gray" title="Blacklist">🚫</a>
+                            <a href="/fix/{{ row.timestamp }}/delete" class="btn btn-red" onclick="return confirm('Delete?');" title="Delete">✕</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

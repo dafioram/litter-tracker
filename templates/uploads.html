@@ -1,0 +1,24 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card">
+    <h3>📜 Upload Log</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Filename</th>
+                <th>Records Added</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in history %}
+            <tr>
+                <td>{{ row.upload_date }}</td>
+                <td>{{ row.filename }}</td>
+                <td>{{ row.entries_added }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

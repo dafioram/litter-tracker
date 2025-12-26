@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Litter Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/2.1.0/chartjs-plugin-annotation.min.js"></script>
+    <style>
+        :root { --primary: #007bff; --bg: #f4f4f9; --card: #ffffff; --text: #333; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 20px; margin: 0;}
+        .container { max-width: 1000px; margin: 0 auto; }
+        
+        /* Nav */
+        .nav { display: flex; gap: 10px; margin-bottom: 20px; background: white; padding: 10px; border-radius: 12px; overflow-x: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .nav a { text-decoration: none; color: #555; padding: 10px 15px; border-radius: 6px; white-space: nowrap; font-weight: 500; }
+        .nav a.active { background: var(--primary); color: white; }
+        
+        /* Components */
+        .card { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; color: white; font-weight: bold; text-align: center;}
+        .alert.success { background: #28a745; }
+        .alert.error { background: #dc3545; }
+        .alert.warning { background: #ffc107; color: #333; }
+        
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; color: #666; font-size: 0.9em; text-transform: uppercase;}
+        
+        /* Buttons */
+        .btn { padding: 5px 10px; border-radius: 4px; text-decoration: none; font-size: 0.85em; display: inline-block; margin-right: 4px; color: white;}
+        .btn-blue { background: #007bff; }
+        .btn-green { background: #28a745; }
+        .btn-red { background: #dc3545; }
+        .btn-gray { background: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/" class="{{ 'active' if request.path == '/' else '' }}">🏠 Dashboard</a>
+            <a href="/review" class="{{ 'active' if request.path == '/review' else '' }}">⚠️ Review Data</a>
+            <a href="/analysis" class="{{ 'active' if request.path == '/analysis' else '' }}">📈 Trends</a>
+            <a href="/editor" class="{{ 'active' if request.path == '/editor' else '' }}">✏️ Editor</a>
+            <a href="/uploads" class="{{ 'active' if request.path == '/uploads' else '' }}">📜 Logs</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  litter-tracker:
+    build: .
+    container_name: litter-tracker
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5000}:5000"
+    volumes:
+      # Persists DB and Backups outside container
+      # LEFT SIDE: Your computer (Current folder/data)
+      # RIGHT SIDE: Container (Workdir/data)
+      - ./data:/app/data

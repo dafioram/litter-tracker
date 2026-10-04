@@ -1,0 +1,10 @@
+# Keep personal data and secrets out of the image (data/ is mounted at runtime)
+data
+.env
+.git
+.github
+tests
+__pycache__/
+*.pyc
+venv/
+.DS_Store

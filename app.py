@@ -309,7 +309,6 @@ def load_manual_dwell(conn):
 
 @app.route('/')
 def dashboard():
-    init_db()
     conn = get_db()
     profiles = conn.execute("SELECT * FROM cat_profiles").fetchall()
     
@@ -940,8 +939,11 @@ def report():
                            date_range=date_range,
                            generated_date=datetime.now().strftime('%b %d, %Y'))
 
+# Create/migrate tables at startup, so every route (not just the dashboard)
+# works on a fresh install, including under gunicorn
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     # Use the PORT from .env, or fallback to 5000 if not found
     port = int(os.environ.get('PORT', 5000)) 
     app.run(host='0.0.0.0', port=port)

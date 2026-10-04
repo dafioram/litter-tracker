@@ -31,14 +31,18 @@
                         <td><span style="background:#ffeeba; padding:2px 6px; border-radius:4px;">{{ row.cat_identity }}</span></td>
                         <td style="color:#dc3545;">{{ row.flag_reason }}</td>
                         <td>
+                            <form action="/fix" method="post" class="inline-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="timestamp" value="{{ row.timestamp }}">
                             {% for cat in profiles %}
-                            <a href="/fix/{{ row.timestamp }}/{{ cat.name }}" class="btn" style="background-color: {{ cat.color_hex }}; color:white;">
+                            <button name="cat" value="{{ cat.name }}" class="btn" style="background-color: {{ cat.color_hex }}; color:white;">
                                 {{ cat.name }}
-                            </a>
+                            </button>
                             {% endfor %}
                             
-                            <a href="/fix/{{ row.timestamp }}/blacklist" class="btn btn-gray" title="Blacklist">🚫</a>
-                            <a href="/fix/{{ row.timestamp }}/delete" class="btn btn-red" onclick="return confirm('Delete?');" title="Delete">✕</a>
+                            <button name="action" value="blacklist" class="btn btn-gray" title="Blacklist">🚫</button>
+                            <button name="action" value="delete" class="btn btn-red" onclick="return confirm('Delete?');" title="Delete">✕</button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}

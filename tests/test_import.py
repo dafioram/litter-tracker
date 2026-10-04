@@ -60,10 +60,10 @@ def test_fills_in_rows_dropped_by_older_imports(upload, db):
     assert db("SELECT COUNT(*) FROM usage_logs")[0][0] == 10
 
 
-def test_blacklisted_row_is_not_reimported(client, upload, db):
+def test_blacklisted_row_is_not_reimported(post, upload, db):
     upload(CSV)
     ts = db("SELECT timestamp FROM usage_logs WHERE activity = 'Cat detected' AND timestamp LIKE '2026-10-02 09:51%'")[0]['timestamp']
-    client.get(f'/fix/{ts}/blacklist')
+    post('/fix', {'timestamp': ts, 'action': 'blacklist'})
     upload(CSV)
     assert not db("SELECT * FROM usage_logs WHERE activity = 'Cat detected' AND timestamp LIKE '2026-10-02 09:51%'")
     # The weight in the same minute is untouched

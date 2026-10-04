@@ -52,6 +52,7 @@ cp .env.example .env
 * `TIMEZONE_OFFSET`: Fixed-hour fallback used when `TIMEZONE` is empty. Set `TIMEZONE=` and `TIMEZONE_OFFSET=0` if your CSV times already match the Whisker app.
 
 To tell which applies, compare the newest row of your CSV with the newest entry in the Whisker app's History screen. Changing these settings only affects future imports.
+* `APP_PASSWORD`: Set this (and optionally `APP_USERNAME`, default `admin`) to require a login. Recommended if other people on your network can reach the app.
 * `PORT`: Default is 5000. Change this if you want to access the dashboard on a different port.
 
 ### 3. Run the App

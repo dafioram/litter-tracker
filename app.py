@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import json
+import re
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash
 
@@ -97,6 +98,42 @@ def classify_row(row, profiles):
     else:
         return "Unknown", f"No match within {WEIGHT_TOLERANCE}lbs (Closest: {best_match} @ {closest_diff:.1f} diff)"
 
+# --- TIMESTAMP PARSING ---
+def export_date_from_filename(filename):
+    """
+    Whisker names exports like 'litter-robot_4_activity_2026-10-04.csv'.
+    Returns that date as a datetime, or None if the name has no date.
+    """
+    match = re.search(r'(\d{4})-(\d{2})-(\d{2})', filename or '')
+    if match:
+        try:
+            return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            pass
+    return None
+
+def parse_whisker_timestamp(raw_ts, latest_allowed):
+    """
+    Whisker timestamps have no year ('10/4 7:01 am'). Picks the most recent year
+    that doesn't put the entry after latest_allowed, so a January export that
+    still contains December entries keeps those in the previous year.
+    Raises ValueError if the timestamp can't be parsed.
+    """
+    parts = raw_ts.split()
+    month, day = map(int, parts[0].split('/'))
+    hour, minute = map(int, parts[1].split(':'))
+    if parts[2].lower() == 'pm' and hour != 12: hour += 12
+    elif parts[2].lower() == 'am' and hour == 12: hour = 0
+
+    for year in (latest_allowed.year, latest_allowed.year - 1):
+        try:
+            dt = datetime(year, month, day, hour, minute)
+        except ValueError:
+            continue  # e.g. Feb 29 in a non-leap year
+        if dt <= latest_allowed:
+            return dt
+    raise ValueError(f"No valid year for timestamp '{raw_ts}'")
+
 # --- ROUTES ---
 
 @app.route('/')
@@ -105,8 +142,9 @@ def dashboard():
     conn = get_db()
     profiles = conn.execute("SELECT * FROM cat_profiles").fetchall()
     
-    current_year_start = f"{datetime.now().year}-01-01"
-    df = pd.read_sql_query(f"SELECT * FROM usage_logs WHERE timestamp >= '{current_year_start}' ORDER BY timestamp ASC", conn)
+    # Rolling year (not Jan 1) so stats don't reset to empty every January
+    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE timestamp >= ? ORDER BY timestamp ASC", conn, params=(one_year_ago,))
     
     thirty_days_ago_dt = datetime.now() - timedelta(days=30)
     cycle_count = 0; interrupt_count = 0; review_count = 0
@@ -299,8 +337,8 @@ def analysis():
     colors['Unknown'] = "#999999"
     colors['System'] = "#ffcd56"
     
-    current_year_start = f"{datetime.now().year}-01-01"
-    df = pd.read_sql_query(f"SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= '{current_year_start}' ORDER BY timestamp ASC", conn)
+    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(one_year_ago,))
     conn.close()
 
     if df.empty: return render_template('analysis.html', weight_data=None, scatter_data=None, machine_data=None, dwell_data=None, freq_data=None)
@@ -424,7 +462,16 @@ def upload_file():
     file.save(filepath)
     
     added = 0
-    current_year = datetime.now().year
+    skipped = 0
+
+    # The CSV has no years, so anchor them to the export date in the filename
+    # (falls back to the server clock). Two days of slack covers the export
+    # finishing late in the day and UTC timestamps running ahead of local time.
+    export_date = export_date_from_filename(file.filename)
+    if export_date:
+        latest_allowed = export_date + timedelta(days=2)
+    else:
+        latest_allowed = datetime.now() + timedelta(days=1)
 
     # --- 2. LOAD DATA FOR PROCESSING ---
     profile_rows = conn.execute("SELECT * FROM cat_profiles").fetchall()
@@ -444,20 +491,16 @@ def upload_file():
                 raw_activity, raw_ts, raw_val = row[0].strip(), row[1].strip(), row[2].strip()
 
                 try:
-                    parts = raw_ts.split()
-                    month, day = map(int, parts[0].split('/'))
-                    hour, minute = map(int, parts[1].split(':'))
-                    if parts[2].lower() == 'pm' and hour != 12: hour += 12
-                    elif parts[2].lower() == 'am' and hour == 12: hour = 0
-                    
-                    dt_utc = datetime(current_year, month, day, hour, minute)
+                    dt_utc = parse_whisker_timestamp(raw_ts, latest_allowed)
                     # Use the Variable from .env (defined at top of app.py)
-                    dt = dt_utc - timedelta(hours=TIMEZONE_OFFSET) 
-                    
+                    dt = dt_utc - timedelta(hours=TIMEZONE_OFFSET)
+
                     weight = 0.0
                     if 'lbs' in raw_val:
                          weight = float(raw_val.replace('lbs', '').strip())
-                except: continue
+                except (ValueError, IndexError):
+                    skipped += 1
+                    continue
 
                 ts_str = dt.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -510,7 +553,12 @@ def upload_file():
                 print(f"⚠️ Backup failed: {e}")
             # ---------------------------
 
-            flash(f"Upload Successful! Added {added} records. (Backup created)", "success")
+            msg = f"Upload Successful! Added {added} records"
+            if parsed_rows:
+                msg += f" ({parsed_rows[0]['date']} to {parsed_rows[-1]['date']})"
+            if skipped:
+                msg += f", skipped {skipped} unreadable rows"
+            flash(msg + ". (Backup created)", "success")
 
     except Exception as e:
         flash(f"Error: {e}", "error")

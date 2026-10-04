@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import json
 import re
+from collections import Counter
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash
 
@@ -477,8 +478,10 @@ def upload_file():
     profile_rows = conn.execute("SELECT * FROM cat_profiles").fetchall()
     profiles = [dict(row) for row in profile_rows]
 
-    bl_rows = conn.execute("SELECT timestamp, weight FROM data_blacklist").fetchall()
-    blacklist_set = {f"{r['timestamp']}|{float(r['weight'])}" for r in bl_rows}
+    # Blacklist matches on minute + weight + activity, so seconds added to
+    # same-minute rows (see below) don't let blacklisted rows back in
+    bl_rows = conn.execute("SELECT timestamp, weight, reason FROM data_blacklist").fetchall()
+    blacklist_set = {(r['timestamp'][:16], float(r['weight']), r['reason']) for r in bl_rows}
 
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -504,11 +507,28 @@ def upload_file():
 
                 ts_str = dt.strftime('%Y-%m-%d %H:%M:%S')
 
-                if f"{ts_str}|{weight}" in blacklist_set: continue
+                if (ts_str[:16], weight, raw_activity) in blacklist_set: continue
 
                 parsed_rows.append({'dt': dt, 'timestamp': ts_str, 'date': dt.strftime('%Y-%m-%d'), 'time': dt.strftime('%H:%M:%S'), 'activity': raw_activity, 'weight': weight, 'raw_val': raw_val})
 
+            # The CSV is newest-first, so reverse it before the (stable) sort to
+            # keep same-minute events in the order they happened
+            parsed_rows.reverse()
             parsed_rows.sort(key=lambda x: x['dt'])
+
+            # Timestamps only have minute precision, but several events often
+            # share a minute (e.g. "Cat detected" + "Weight recorded"). Skip rows
+            # already in the DB by matching minute + activity + weight, and give
+            # new rows the next free second so the timestamp key stays unique.
+            existing_counts = Counter()
+            taken_ts = set()
+            if parsed_rows:
+                existing = conn.execute("SELECT timestamp, activity, weight FROM usage_logs WHERE timestamp >= ? AND timestamp <= ?",
+                                        (parsed_rows[0]['timestamp'][:16], parsed_rows[-1]['timestamp'][:16] + ':59')).fetchall()
+                for r in existing:
+                    existing_counts[(r['timestamp'][:16], r['activity'], float(r['weight']))] += 1
+                    taken_ts.add(r['timestamp'])
+            file_counts = Counter()
 
             # --- 3. INSERT WITH DYNAMIC CLASSIFICATION ---
             for i, row in enumerate(parsed_rows):
@@ -526,11 +546,19 @@ def upload_file():
                             break
                     if cat_id == 'Unknown': reason = "No weight found in 7m"
 
-                try:
-                    conn.execute('INSERT INTO usage_logs (timestamp, date, time, weight, activity, metadata, cat_identity, flag_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', 
-                        (row['timestamp'], row['date'], row['time'], row['weight'], row['activity'], json.dumps({'raw_val': row['raw_val']}), cat_id, reason))
-                    added += 1
-                except sqlite3.IntegrityError: pass
+                minute = row['timestamp'][:16]
+                key = (minute, row['activity'], row['weight'])
+                file_counts[key] += 1
+                if file_counts[key] <= existing_counts[key]: continue  # Already imported
+
+                free_seconds = [s for s in range(60) if f"{minute}:{s:02d}" not in taken_ts]
+                if not free_seconds: continue
+                ts = f"{minute}:{free_seconds[0]:02d}"
+                taken_ts.add(ts)
+
+                conn.execute('INSERT INTO usage_logs (timestamp, date, time, weight, activity, metadata, cat_identity, flag_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', 
+                    (ts, row['date'], ts[11:], row['weight'], row['activity'], json.dumps({'raw_val': row['raw_val']}), cat_id, reason))
+                added += 1
 
             conn.execute('INSERT INTO upload_history (upload_date, filename, entries_added) VALUES (?, ?, ?)', (datetime.now().strftime('%Y-%m-%d %H:%M'), file.filename, added))
             

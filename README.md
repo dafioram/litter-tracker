@@ -66,6 +66,14 @@ docker compose up -d --build
 
 Access the dashboard at: **http://localhost:5000** (or your server IP).
 
+### Running without Docker
+
+```bash
+./python_install.sh   # installs the Python packages
+cp .env.example .env  # then edit as above
+./run.sh
+```
+
 ---
 
 ## 📖 How to Use

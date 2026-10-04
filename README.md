@@ -87,6 +87,15 @@ Access the dashboard at: **http://localhost:5000** (or your server IP).
 
 ---
 
+## 🧪 Running Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Tests also run automatically on every pull request via GitHub Actions.
+
 ## 🛠️ Tech Stack
 
 * **Backend:** Python (Flask, Pandas, SQLite)

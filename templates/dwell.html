@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card">
+    <h3>⏳ Dwell Times Needing Input</h3>
+    <p style="color:#666; font-size:0.9em;">
+        Dwell time is calculated as (cycle start &minus; {{ wait_minutes }} min wait) &minus; the last "Cat detected" before it.
+        These cycles are missing a "Cat detected" event or came out longer than {{ "%g" | format(max_minutes) }} min, which usually means
+        the CSV missed an event (e.g. the cat left and came back). Enter the real dwell time if you know it, or ignore the cycle.
+    </p>
+
+    {% if not pending %}
+        <div style="text-align:center; padding:30px; color:green;">
+            <h3>✨ Nothing to fill in!</h3>
+        </div>
+    {% else %}
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cycle Start</th>
+                        <th>Cat</th>
+                        <th>Reason</th>
+                        <th>Dwell (min)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in pending %}
+                    <tr>
+                        <td>{{ e.cycle_timestamp }}</td>
+                        <td>{{ e.cat }}</td>
+                        <td style="color:#dc3545;">{{ e.reason }}</td>
+                        <td>
+                            <form action="/dwell" method="post" class="inline-form" style="display:flex; gap:5px; align-items:center;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="cycle_timestamp" value="{{ e.cycle_timestamp }}">
+                                <input type="number" name="minutes" step="0.5" min="0" max="60" style="width:60px; padding:4px;"
+                                       {% if e.calculated is not none %}placeholder="{{ e.calculated }}"{% endif %}>
+                                <button name="action" value="save" class="btn btn-green">Save</button>
+                                <button name="action" value="ignore" class="btn btn-gray" formnovalidate title="Leave this cycle out of the chart">Ignore</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
+
+{% if overridden %}
+<div class="card">
+    <h3>✏️ Manual Entries</h3>
+    <div style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Cycle Start</th>
+                    <th>Cat</th>
+                    <th>Dwell (min)</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in overridden %}
+                <tr>
+                    <td>{{ e.cycle_timestamp }}</td>
+                    <td>{{ e.cat }}</td>
+                    <td>{{ 'Ignored' if e.status == 'ignored' else e.minutes }}</td>
+                    <td>
+                        <form action="/dwell" method="post" class="inline-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="cycle_timestamp" value="{{ e.cycle_timestamp }}">
+                            <button name="action" value="clear" class="btn btn-gray">Clear</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

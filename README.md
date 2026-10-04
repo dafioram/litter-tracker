@@ -89,6 +89,10 @@ Access the dashboard at: **http://localhost:5000** (or your server IP).
 2. The system will automatically classify entries based on the weights you set.
 3. Use the **Trends** tab to view health charts or the **Review** tab to fix any "Unknown" or "Error" entries.
 
+### Dwell Time
+
+Dwell time (how long the cat was in the globe) is calculated from the cycle start minus your robot's Clean Cycle Wait Time (`CLEAN_CYCLE_WAIT_MINUTES`, default 7) minus when the cat was detected. The robot and its CSV sometimes miss events, so cycles with no "Cat detected" event, or with a calculated time longer than `DWELL_MAX_MINUTES` (default 6), are listed on the **Dwell** page (linked from the Trends tab). There you can enter the real time or ignore the cycle.
+
 ---
 
 ## 🧪 Running Tests

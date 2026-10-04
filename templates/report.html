@@ -17,6 +17,7 @@
         .chart-container { position: relative; height: 250px; width: 100%; border: 1px solid #eee; }
         .flags-section { border-top: 2px solid #333; padding-top: 10px; }
         .flag { color: #d9534f; margin-bottom: 5px; font-weight: bold; }
+        .btn { padding: 4px 10px; border: none; border-radius: 4px; background: #007bff; color: white; cursor: pointer; }
         
         @media print {
             body { -webkit-print-color-adjust: exact; font-size: 12pt; }
@@ -31,11 +32,17 @@
         <div>
             <h1>Health Report: {{ cat }}</h1>
             <div style="color:#666; margin-top:5px;">Generated: {{ generated_date }}</div>
+            <div style="color:#666; margin-top:3px;">Period: {{ date_range.start or 'All records' }} to {{ date_range.end }}</div>
         </div>
-        <div class="no-print">
+        <div class="no-print" style="display:flex; flex-direction:column; gap:10px; align-items:flex-end;">
+            {% with range_hidden = {'cat': cat} %}{% include "_range_picker.html" %}{% endwith %}
             <button onclick="window.print()" style="padding:10px 20px; font-size:16px; cursor:pointer; background: #eee; border:1px solid #999;">🖨️ Print to PDF</button>
         </div>
     </div>
+
+    {% if not has_data %}
+    <p style="color:#d9534f; font-weight:bold;">No data for {{ cat }} in this period.</p>
+    {% endif %}
 
     <div class="stats-grid">
         <div class="stat-box">
@@ -53,14 +60,14 @@
     </div>
 
     <div class="chart-section">
-        <h3>Weight History (1 Year)</h3>
+        <h3>Weight History</h3>
         <div class="chart-container">
             <canvas id="weightChart"></canvas>
         </div>
     </div>
 
     <div class="chart-section">
-        <h3>Visit Frequency (30 Days)</h3>
+        <h3>Visit Frequency</h3>
         <div class="chart-container">
             <canvas id="freqChart"></canvas>
         </div>
@@ -68,7 +75,7 @@
 
     {% if flags %}
     <div class="flags-section">
-        <h3>⚠️ Health Alerts (Last 30 Days)</h3>
+        <h3>⚠️ Health Alerts</h3>
         {% for flag in flags %}
             <div class="flag">{{ flag }}</div>
         {% endfor %}
@@ -97,7 +104,7 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { type: 'time', time: { unit: 'month' } },
+                    x: { type: 'time' },
                     y: { title: { display: true, text: 'lbs' } }
                 }
             }

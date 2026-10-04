@@ -64,6 +64,13 @@ app.secret_key = load_secret_key()
 # Tolerance for classification (lbs)
 WEIGHT_TOLERANCE = 2.0 
 
+# DWELL TIME: The robot starts cleaning this many minutes after the cat leaves
+# (the LR4 "Clean Cycle Wait Time" setting: 3, 7 or 15).
+CLEAN_CYCLE_WAIT_MINUTES = int(os.environ.get('CLEAN_CYCLE_WAIT_MINUTES', 7))
+# Calculated dwell times above this are usually a missed event in the CSV
+# (e.g. the cat left and came back), so they're sent for manual entry instead.
+DWELL_MAX_MINUTES = float(os.environ.get('DWELL_MAX_MINUTES', 6))
+
 # --- DATABASE SETUP ---
 def get_db():
     conn = sqlite3.connect(DB_NAME)
@@ -89,6 +96,10 @@ def init_db():
         birthday TEXT
     )''')
     
+    # Manually entered dwell times, keyed by the cycle's start timestamp.
+    # minutes = NULL means "ignore this cycle".
+    conn.execute('''CREATE TABLE IF NOT EXISTS dwell_manual (cycle_timestamp TEXT PRIMARY KEY, minutes REAL)''')
+
     # MIGRATION CHECK: If you already created the table without birthday, add it now
     try:
         conn.execute("ALTER TABLE cat_profiles ADD COLUMN birthday TEXT")
@@ -204,6 +215,64 @@ def csv_time_to_local(dt):
     if LOCAL_TZ:
         return dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ).replace(tzinfo=None)
     return dt - timedelta(hours=TIMEZONE_OFFSET)
+
+# --- DWELL TIME ---
+def compute_dwell_times(df, manual):
+    """
+    Estimates how long the cat spent in the globe for each clean cycle.
+    The robot starts cleaning CLEAN_CYCLE_WAIT_MINUTES after the cat leaves, so
+    exit = cycle start - wait, and dwell = exit - the last 'Cat detected' before it.
+
+    df: usage_logs rows with a 'dt' column, sorted by time
+    manual: {cycle_timestamp: minutes, or None to ignore}
+    Returns one dict per cycle. status is 'calculated', 'manual', 'ignored' or
+    'needs_input' (with a reason) when the CSV doesn't support a trustworthy value.
+    """
+    df = df.assign(minute=df['dt'].dt.floor('min'))
+    starts = df[df['activity'] == 'Clean Cycle In Progress']
+    detections = df[df['activity'].str.contains('Cat detected', case=False)]
+    weights = df[(df['activity'] == 'Weight recorded') & (df['weight'] > 0.5)]
+    real_cat = lambda name: name not in ('Unknown', 'System', 'Error')
+
+    results = []
+    prev_start = None
+    for _, start in starts.iterrows():
+        exit_time = start['minute'] - timedelta(minutes=CLEAN_CYCLE_WAIT_MINUTES)
+        # Only look back to the previous cycle so one visit isn't counted twice
+        lookback = exit_time - timedelta(minutes=60)
+        if prev_start is not None: lookback = max(lookback, prev_start)
+        prev_start = start['minute']
+
+        in_window = lambda rows: rows[(rows['minute'] > lookback) & (rows['minute'] <= exit_time)]
+        entry_rows, weight_rows = in_window(detections), in_window(weights)
+
+        cat = 'Unknown'
+        if not entry_rows.empty and real_cat(entry_rows.iloc[-1]['cat_identity']):
+            cat = entry_rows.iloc[-1]['cat_identity']
+        elif not weight_rows.empty and real_cat(weight_rows.iloc[-1]['cat_identity']):
+            cat = weight_rows.iloc[-1]['cat_identity']
+
+        entry = {'cycle_timestamp': start['timestamp'], 'cat': cat, 'calculated': None, 'minutes': None, 'reason': ''}
+        if not entry_rows.empty:
+            entry['calculated'] = round((exit_time - entry_rows.iloc[-1]['minute']).total_seconds() / 60, 1)
+
+        if start['timestamp'] in manual:
+            entry['minutes'] = manual[start['timestamp']]
+            entry['status'] = 'ignored' if entry['minutes'] is None else 'manual'
+        elif entry['calculated'] is None:
+            entry['status'] = 'needs_input'
+            entry['reason'] = "No 'Cat detected' logged before this cycle"
+        elif not 0 <= entry['calculated'] <= DWELL_MAX_MINUTES:
+            entry['status'] = 'needs_input'
+            entry['reason'] = f"Calculated {entry['calculated']:g} min is outside the expected 0-{DWELL_MAX_MINUTES:g} min"
+        else:
+            entry['status'] = 'calculated'
+            entry['minutes'] = entry['calculated']
+        results.append(entry)
+    return results
+
+def load_manual_dwell(conn):
+    return {r['cycle_timestamp']: r['minutes'] for r in conn.execute("SELECT cycle_timestamp, minutes FROM dwell_manual")}
 
 # --- ROUTES ---
 
@@ -428,9 +497,10 @@ def analysis():
     
     one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
     df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(one_year_ago,))
+    manual_dwell = load_manual_dwell(conn)
     conn.close()
 
-    if df.empty: return render_template('analysis.html', weight_data='null', scatter_data='null', machine_data='null', dwell_data='null', freq_data='null')
+    if df.empty: return render_template('analysis.html', weight_data='null', scatter_data='null', machine_data='null', dwell_data='null', freq_data='null', dwell_pending=0)
 
     df['dt'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
 
@@ -482,28 +552,16 @@ def analysis():
             
     machine_data = {"datasets": [{"label": "Cycle Duration (min)", "data": machine_health, "borderColor": "#ffcd56", "backgroundColor": "#ffcd56"}]}
 
-    # 4. Dwell Time
+    # 4. Dwell Time (calculated, or manually entered when the CSV can't support it)
     dwell_data = {"datasets": []}
-    for cat in colors.keys():
-        if cat == 'System': continue
-        
-        # Simple extraction for demo (Logic can be optimized)
-        cat_points = []
-        for _, start_row in cycle_start.iterrows():
-            virtual_exit = start_row['dt'] - timedelta(minutes=15)
-            window_start = virtual_exit - timedelta(minutes=30)
-            candidates = df[(df['dt'] >= window_start) & (df['dt'] <= virtual_exit) & (df['activity'].str.contains('Cat detected', case=False))]
-            if candidates.empty: continue
-            last_cat = candidates.iloc[-1]
-            
-            # Match Identity
-            if last_cat['cat_identity'] == cat:
-                dwell_min = (virtual_exit - last_cat['dt']).total_seconds() / 60
-                if 0 < dwell_min < 30:
-                     cat_points.append({'x': str(start_row['timestamp']).replace(" ", "T"), 'y': round(dwell_min, 1)})
-        
-        if cat_points:
-            dwell_data["datasets"].append({"label": cat, "data": cat_points, "backgroundColor": colors.get(cat, "#333")})
+    dwell = compute_dwell_times(df, manual_dwell)
+    dwell_pending = sum(1 for d in dwell if d['status'] == 'needs_input')
+    dwell_points = {}
+    for d in dwell:
+        if d['status'] in ('calculated', 'manual'):
+            dwell_points.setdefault(d['cat'], []).append({'x': str(d['cycle_timestamp']).replace(" ", "T"), 'y': d['minutes']})
+    for cat, points in dwell_points.items():
+        dwell_data["datasets"].append({"label": cat, "data": points, "backgroundColor": colors.get(cat, "#333")})
 
     # 5. Frequency
     freq_data = {"labels": [], "datasets": []}
@@ -525,7 +583,47 @@ def analysis():
         if sum(daily_counts) > 0:
             freq_data["datasets"].append({"label": cat, "data": daily_counts, "backgroundColor": colors.get(cat, "#333")})
 
-    return render_template('analysis.html', weight_data=js_json(weight_data), scatter_data=js_json(scatter_data), machine_data=js_json(machine_data), dwell_data=js_json(dwell_data), freq_data=js_json(freq_data))
+    return render_template('analysis.html', weight_data=js_json(weight_data), scatter_data=js_json(scatter_data), machine_data=js_json(machine_data), dwell_data=js_json(dwell_data), freq_data=js_json(freq_data), dwell_pending=dwell_pending)
+
+@app.route('/dwell', methods=['GET', 'POST'])
+def dwell():
+    conn = get_db()
+
+    if request.method == 'POST':
+        cycle_ts = request.form.get('cycle_timestamp', '')
+        action = request.form.get('action')
+        if action == 'clear':
+            conn.execute("DELETE FROM dwell_manual WHERE cycle_timestamp = ?", (cycle_ts,))
+            flash("Cleared manual dwell time.", "success")
+        elif action == 'ignore':
+            conn.execute("INSERT OR REPLACE INTO dwell_manual (cycle_timestamp, minutes) VALUES (?, NULL)", (cycle_ts,))
+            flash("Cycle ignored for dwell time.", "warning")
+        else:
+            try:
+                minutes = float(request.form.get('minutes', ''))
+                if not 0 <= minutes <= 60: raise ValueError
+                conn.execute("INSERT OR REPLACE INTO dwell_manual (cycle_timestamp, minutes) VALUES (?, ?)", (cycle_ts, minutes))
+                flash(f"Saved {minutes:g} min.", "success")
+            except ValueError:
+                flash("Enter a dwell time between 0 and 60 minutes.", "error")
+        conn.commit()
+        conn.close()
+        return redirect(url_for('dwell'))
+
+    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(one_year_ago,))
+    manual = load_manual_dwell(conn)
+    conn.close()
+
+    entries = []
+    if not df.empty:
+        df['dt'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
+        entries = compute_dwell_times(df, manual)
+    entries.reverse()  # Newest first
+    return render_template('dwell.html',
+                           pending=[e for e in entries if e['status'] == 'needs_input'],
+                           overridden=[e for e in entries if e['status'] in ('manual', 'ignored')],
+                           wait_minutes=CLEAN_CYCLE_WAIT_MINUTES, max_minutes=DWELL_MAX_MINUTES)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():

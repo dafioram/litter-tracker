@@ -44,6 +44,13 @@
     <p style="color:#666; font-size:0.9em; margin-top:5px;">
         Most "Number 1" visits are under 2 minutes. Long durations may indicate constipation or cleaning.
     </p>
+    {% if dwell_pending %}
+    <div class="alert warning" style="padding:10px; margin-bottom:10px;">
+        <a href="/dwell" style="color:inherit;">{{ dwell_pending }} cycle{{ 's' if dwell_pending != 1 }} couldn't be calculated from the CSV and need a manual dwell time &rarr;</a>
+    </div>
+    {% else %}
+    <p style="font-size:0.85em; margin-top:0;"><a href="/dwell" style="color:#007bff;">Manage manual dwell times &rarr;</a></p>
+    {% endif %}
     <div class="chart-container"><canvas id="dwellChart"></canvas></div>
 </div>
 

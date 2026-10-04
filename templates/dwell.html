@@ -4,7 +4,7 @@
     <h3>⏳ Dwell Times Needing Input</h3>
     <p style="color:#666; font-size:0.9em;">
         Dwell time is calculated as (cycle start &minus; {{ wait_minutes }} min wait) &minus; the last "Cat detected" before it.
-        These cycles are missing a "Cat detected" event or came out longer than {{ max_minutes | round(1) }} min, which usually means
+        These cycles are missing a "Cat detected" event or came out longer than {{ "%g" | format(max_minutes) }} min, which usually means
         the CSV missed an event (e.g. the cat left and came back). Enter the real dwell time if you know it, or ignore the cycle.
     </p>
 

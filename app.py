@@ -6,7 +6,8 @@ import tempfile
 import json
 import re
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, redirect, url_for, flash
 
 app = Flask(__name__)
@@ -15,8 +16,11 @@ app = Flask(__name__)
 # This prevents your actual secret key from being hardcoded on GitHub
 app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_change_in_production')
 
-# TIMEZONE: Get offset from .env (Default to 5 hours for EST)
-# Users in other zones can change this variable
+# TIMEZONE: How to convert CSV timestamps to local wall-clock time.
+# TIMEZONE (e.g. America/New_York) treats CSV times as UTC and converts them,
+# following daylight saving. Otherwise TIMEZONE_OFFSET hours are subtracted
+# (Default to 5 hours for EST); use 0 if your CSV times are already local.
+LOCAL_TZ = ZoneInfo(os.environ['TIMEZONE']) if os.environ.get('TIMEZONE') else None
 TIMEZONE_OFFSET = int(os.environ.get('TIMEZONE_OFFSET', 5))
 
 # --- CONFIGURATION ---
@@ -134,6 +138,12 @@ def parse_whisker_timestamp(raw_ts, latest_allowed):
         if dt <= latest_allowed:
             return dt
     raise ValueError(f"No valid year for timestamp '{raw_ts}'")
+
+def csv_time_to_local(dt):
+    """Converts a naive CSV timestamp to naive local time per the settings above."""
+    if LOCAL_TZ:
+        return dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ).replace(tzinfo=None)
+    return dt - timedelta(hours=TIMEZONE_OFFSET)
 
 # --- ROUTES ---
 
@@ -494,9 +504,7 @@ def upload_file():
                 raw_activity, raw_ts, raw_val = row[0].strip(), row[1].strip(), row[2].strip()
 
                 try:
-                    dt_utc = parse_whisker_timestamp(raw_ts, latest_allowed)
-                    # Use the Variable from .env (defined at top of app.py)
-                    dt = dt_utc - timedelta(hours=TIMEZONE_OFFSET)
+                    dt = csv_time_to_local(parse_whisker_timestamp(raw_ts, latest_allowed))
 
                     weight = 0.0
                     if 'lbs' in raw_val:

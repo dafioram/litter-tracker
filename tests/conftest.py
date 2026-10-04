@@ -11,6 +11,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, 'DB_NAME', str(tmp_path / 'test.db'))
     monkeypatch.setattr(app_module, 'BACKUP_FOLDER', str(tmp_path / 'backups'))
     monkeypatch.setattr(app_module, 'TIMEZONE_OFFSET', 0)
+    monkeypatch.setattr(app_module, 'LOCAL_TZ', None)
     app_module.app.config['TESTING'] = True
     app_module.init_db()
     with app_module.app.test_client() as c:

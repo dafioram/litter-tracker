@@ -32,20 +32,24 @@
                     </td>
                     <td>{{ row.activity }}</td>
                     <td>
+                        <form action="/fix" method="post" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="timestamp" value="{{ row.timestamp }}">
                         {% if row.cat_identity == 'Blacklisted' %}
-                            <a href="/fix/{{ row.timestamp }}/restore" class="btn btn-green">Restore</a>
+                            <button name="action" value="restore" class="btn btn-green">Restore</button>
                         {% else %}
                             
                             {% for cat in profiles %}
                                 {% if row.cat_identity != cat.name %}
-                                <a href="/fix/{{ row.timestamp }}/{{ cat.name }}" class="btn" style="background-color: {{ cat.color_hex }}; color:white; opacity: 0.8; font-size: 0.75em;">
+                                <button name="cat" value="{{ cat.name }}" class="btn" style="background-color: {{ cat.color_hex }}; color:white; opacity: 0.8; font-size: 0.75em;">
                                     {{ cat.name }}
-                                </a>
+                                </button>
                                 {% endif %}
                             {% endfor %}
-                            <a href="/fix/{{ row.timestamp }}/blacklist" class="btn btn-gray" title="Ignore this entry">🚫</a>
-                            <a href="/fix/{{ row.timestamp }}/delete" class="btn btn-red" onclick="return confirm('Permanently Delete?');" title="Delete">✕</a>
+                            <button name="action" value="blacklist" class="btn btn-gray" title="Ignore this entry">🚫</button>
+                            <button name="action" value="delete" class="btn btn-red" onclick="return confirm('Permanently Delete?');" title="Delete">✕</button>
                         {% endif %}
+                        </form>
                     </td>
                 </tr>
                 {% endfor %}

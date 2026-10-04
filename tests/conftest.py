@@ -5,6 +5,8 @@ import pytest
 
 import app as app_module
 
+CSRF = 'test-csrf-token'
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -15,8 +17,18 @@ def client(tmp_path, monkeypatch):
     app_module.app.config['TESTING'] = True
     app_module.init_db()
     with app_module.app.test_client() as c:
-        c.post('/manage_cats', data={'action': 'add', 'name': 'Luna', 'weight': '9.5', 'color': '#36a2eb', 'birthday': ''})
+        with c.session_transaction() as sess:
+            sess['csrf_token'] = CSRF
+        c.post('/manage_cats', data={'csrf_token': CSRF, 'action': 'add', 'name': 'Luna', 'weight': '9.5', 'color': '#36a2eb', 'birthday': ''})
         yield c
+
+
+@pytest.fixture
+def post(client):
+    """POST a form with the CSRF token filled in."""
+    def do_post(url, data):
+        return client.post(url, data={'csrf_token': CSRF, **data}, follow_redirects=True)
+    return do_post
 
 
 @pytest.fixture
@@ -33,6 +45,6 @@ def db():
 @pytest.fixture
 def upload(client):
     def do_upload(csv_text, filename='litter-robot_4_activity_2026-10-04.csv'):
-        return client.post('/upload', data={'file': (io.BytesIO(csv_text.encode()), filename)},
+        return client.post('/upload', data={'csrf_token': CSRF, 'file': (io.BytesIO(csv_text.encode()), filename)},
                            content_type='multipart/form-data', follow_redirects=True)
     return do_upload

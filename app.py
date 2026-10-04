@@ -2,19 +2,24 @@ import sqlite3
 import pandas as pd
 import os
 import shutil
-import tempfile
+import io
+import csv
 import json
 import re
+import hmac
+import secrets
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, request, redirect, url_for, flash
+from markupsafe import escape
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Uploads are small CSVs
 
-# SECURITY: Load secret key from .env, or use a random default for dev
-# This prevents your actual secret key from being hardcoded on GitHub
-app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_change_in_production')
+# OPTIONAL LOGIN: Set APP_PASSWORD in .env to require a username/password
+APP_USERNAME = os.environ.get('APP_USERNAME', 'admin')
+APP_PASSWORD = os.environ.get('APP_PASSWORD', '')
 
 # TIMEZONE: How to convert CSV timestamps to local wall-clock time.
 # TIMEZONE (e.g. America/New_York) treats CSV times as UTC and converts them,
@@ -29,6 +34,32 @@ if not os.path.exists(DB_FOLDER):
     os.makedirs(DB_FOLDER)
 DB_NAME = os.path.join(DB_FOLDER, 'litter_history.db')
 BACKUP_FOLDER = os.path.join(DB_FOLDER, 'backups')
+
+# SECURITY: Load secret key from .env. If it's missing (or still the example
+# placeholder), generate one and keep it in data/ so sessions survive restarts.
+def load_secret_key():
+    key = os.environ.get('SECRET_KEY', '')
+    if key and key != 'change_this_to_a_random_string':
+        return key
+    path = os.path.join(DB_FOLDER, '.secret_key')
+    if not os.path.exists(path):
+        # Write to a temp file and link it into place so concurrent gunicorn
+        # workers all end up reading the same complete key
+        tmp = f"{path}.{os.getpid()}"
+        with open(tmp, 'w') as f:
+            f.write(secrets.token_hex(32))
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            pass
+        except OSError:
+            if not os.path.exists(path): os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp): os.remove(tmp)
+    with open(path) as f:
+        return f.read().strip()
+
+app.secret_key = load_secret_key()
 
 # Tolerance for classification (lbs)
 WEIGHT_TOLERANCE = 2.0 
@@ -66,6 +97,35 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+# --- REQUEST SECURITY ---
+@app.before_request
+def require_login():
+    if not APP_PASSWORD: return
+    auth = request.authorization
+    if not (auth and hmac.compare_digest((auth.username or '').encode(), APP_USERNAME.encode())
+            and hmac.compare_digest((auth.password or '').encode(), APP_PASSWORD.encode())):
+        return Response('Login required', 401, {'WWW-Authenticate': 'Basic realm="Litter Tracker"'})
+
+def csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(16)
+    return session['csrf_token']
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+@app.before_request
+def csrf_protect():
+    # Every form includes {{ csrf_token() }} so other sites can't submit changes
+    if request.method == 'POST':
+        token = session.get('csrf_token', '')
+        if not token or not hmac.compare_digest(token.encode(), request.form.get('csrf_token', '').encode()):
+            abort(400, 'Invalid or missing form token. Reload the page and try again.')
+
+def js_json(obj):
+    """JSON that is safe to embed inside a <script> tag (NaN becomes null)."""
+    text = json.dumps(obj).replace('NaN', 'null')
+    return text.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
 
 # --- CLASSIFICATION LOGIC (UPDATED) ---
 def classify_row(row, profiles):
@@ -253,18 +313,26 @@ def manage_cats():
     conn = get_db()
     
     if action == 'add':
-        name = request.form.get('name')
-        weight = float(request.form.get('weight'))
-        color = request.form.get('color')
+        name = (request.form.get('name') or '').strip()
+        color = request.form.get('color', '')
         birthday = request.form.get('birthday') # <--- Get Birthday
-        
         try:
-            # Insert including birthday
-            conn.execute("INSERT INTO cat_profiles (name, target_weight, color_hex, birthday) VALUES (?, ?, ?, ?)", 
-                         (name, weight, color, birthday))
-            flash(f"Added {name}!", "success")
-        except sqlite3.IntegrityError:
-            flash("Cat name already exists.", "error")
+            weight = float(request.form.get('weight'))
+        except (TypeError, ValueError):
+            weight = None
+
+        if not name or weight is None:
+            flash("Name and target weight are required.", "error")
+        elif not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+            flash("Invalid color.", "error")
+        else:
+            try:
+                # Insert including birthday
+                conn.execute("INSERT INTO cat_profiles (name, target_weight, color_hex, birthday) VALUES (?, ?, ?, ?)",
+                             (name, weight, color, birthday))
+                flash(f"Added {name}!", "success")
+            except sqlite3.IntegrityError:
+                flash("Cat name already exists.", "error")
             
     elif action == 'delete':
         name = request.form.get('name')
@@ -284,12 +352,14 @@ def review():
     conn.close()
     return render_template('review.html', logs=logs, profiles=profiles)
 
-@app.route('/fix/<path:timestamp_id>/<action>')
-def fix_entry(timestamp_id, action):
+@app.route('/fix', methods=['POST'])
+def fix_entry():
     conn = get_db()
     
     # CLEAN THE ID: Remove leading/trailing spaces or newlines that breaks the DB lookup
-    timestamp_id = timestamp_id.strip()
+    timestamp_id = request.form.get('timestamp', '').strip()
+    action = request.form.get('action')
+    cat = request.form.get('cat')
     
     if action == 'delete':
         conn.execute("DELETE FROM usage_logs WHERE timestamp = ?", (timestamp_id,))
@@ -329,10 +399,16 @@ def fix_entry(timestamp_id, action):
             # Debugging Help: If it fails, tell us why
             flash(f"Restore Failed: Could not find blacklist ID '{timestamp_id}'", "error")
 
-    # Dynamic Cat Assignment (Matches any string that isn't reserved keywords)
+    # Cat Assignment (sent as a separate field, so any cat name works)
+    elif cat:
+        if conn.execute("SELECT 1 FROM cat_profiles WHERE name = ?", (cat,)).fetchone():
+            conn.execute("UPDATE usage_logs SET cat_identity = ?, flag_reason = '' WHERE timestamp = ?", (cat, timestamp_id))
+            flash(f"Re-assigned to {cat}", "success")
+        else:
+            flash(f"No cat profile named '{cat}'.", "error")
+
     else:
-        conn.execute("UPDATE usage_logs SET cat_identity = ?, flag_reason = '' WHERE timestamp = ?", (action, timestamp_id))
-        flash(f"Re-assigned to {action}", "success")
+        flash("Unknown action.", "error")
         
     conn.commit()
     conn.close()
@@ -354,7 +430,7 @@ def analysis():
     df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(one_year_ago,))
     conn.close()
 
-    if df.empty: return render_template('analysis.html', weight_data=None, scatter_data=None, machine_data=None, dwell_data=None, freq_data=None)
+    if df.empty: return render_template('analysis.html', weight_data='null', scatter_data='null', machine_data='null', dwell_data='null', freq_data='null')
 
     df['dt'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
 
@@ -449,8 +525,7 @@ def analysis():
         if sum(daily_counts) > 0:
             freq_data["datasets"].append({"label": cat, "data": daily_counts, "backgroundColor": colors.get(cat, "#333")})
 
-    def sanitize(obj): return json.loads(json.dumps(obj).replace('NaN', 'null'))
-    return render_template('analysis.html', weight_data=json.dumps(sanitize(weight_data)), scatter_data=json.dumps(sanitize(scatter_data)), machine_data=json.dumps(sanitize(machine_data)), dwell_data=json.dumps(sanitize(dwell_data)), freq_data=json.dumps(sanitize(freq_data)))
+    return render_template('analysis.html', weight_data=js_json(weight_data), scatter_data=js_json(scatter_data), machine_data=js_json(machine_data), dwell_data=js_json(dwell_data), freq_data=js_json(freq_data))
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -470,10 +545,6 @@ def upload_file():
         return redirect(url_for('dashboard'))
     # --------------------------------
 
-    import tempfile, csv
-    filepath = os.path.join(tempfile.gettempdir(), file.filename)
-    file.save(filepath)
-    
     added = 0
     skipped = 0
 
@@ -496,7 +567,8 @@ def upload_file():
     blacklist_set = {(r['timestamp'][:16], float(r['weight']), r['reason']) for r in bl_rows}
 
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        # Read in memory: never write a file named by the client to disk
+        with io.StringIO(file.read().decode('utf-8-sig')) as f:
             next(f, None) 
             reader = csv.reader(f)
             parsed_rows = []
@@ -684,10 +756,10 @@ def report():
 
     # 3. Fetch Data (Extended to 365 days to ensure data shows up)
     start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-    df = pd.read_sql_query(f"SELECT * FROM usage_logs WHERE cat_identity = '{cat_id}' AND timestamp >= '{start_date}' ORDER BY timestamp ASC", conn)
+    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity = ? AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(cat_id, start_date))
     conn.close()
     
-    if df.empty: return f"<h3>No data found for {cat_id} in the last year.</h3>"
+    if df.empty: return f"<h3>No data found for {escape(cat_id)} in the last year.</h3>"
 
     df['dt'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
     
@@ -730,9 +802,9 @@ def report():
                            cat=cat_id, 
                            cat_color=cat_color,
                            stats=stats, 
-                           weight_data=json.dumps(weight_data), 
-                           freq_labels=json.dumps(freq_labels), 
-                           freq_values=json.dumps(freq_values), 
+                           weight_data=js_json(weight_data), 
+                           freq_labels=js_json(freq_labels), 
+                           freq_values=js_json(freq_values), 
                            flags=flags, 
                            generated_date=datetime.now().strftime('%b %d, %Y'))
 

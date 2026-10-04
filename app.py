@@ -161,8 +161,10 @@ def dashboard():
     cycle_count = 0; interrupt_count = 0; review_count = 0
     
     if not df.empty:
-        cycle_count = conn.execute(f"SELECT COUNT(*) FROM usage_logs WHERE activity LIKE '%Clean Cycle%' AND timestamp > '{thirty_days_ago_dt}'").fetchone()[0]
-        interrupt_count = conn.execute(f"SELECT COUNT(*) FROM usage_logs WHERE activity LIKE '%interrupted%' AND timestamp > '{thirty_days_ago_dt}'").fetchone()[0]
+        thirty_days_ago = thirty_days_ago_dt.strftime('%Y-%m-%d %H:%M:%S')
+        # Count completions only: each cycle also logs a "Clean Cycle In Progress" row
+        cycle_count = conn.execute("SELECT COUNT(*) FROM usage_logs WHERE activity = 'Clean Cycle Complete' AND timestamp > ?", (thirty_days_ago,)).fetchone()[0]
+        interrupt_count = conn.execute("SELECT COUNT(*) FROM usage_logs WHERE activity LIKE '%interrupted%' AND timestamp > ?", (thirty_days_ago,)).fetchone()[0]
         review_count = conn.execute("SELECT COUNT(*) FROM usage_logs WHERE (flag_reason != '' OR cat_identity = 'Error' OR cat_identity = 'Unknown') AND cat_identity != 'System'").fetchone()[0]
     
     conn.close()

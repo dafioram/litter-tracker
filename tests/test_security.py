@@ -17,7 +17,7 @@ def test_fix_requires_post(client):
 def test_report_cat_name_is_not_sql_or_html(client):
     response = client.get('/report', query_string={'cat': "x' OR '1'='1"})
     assert response.status_code == 200
-    assert 'No data found' in response.get_data(as_text=True)
+    assert 'No data for' in response.get_data(as_text=True)
 
     html = client.get('/report', query_string={'cat': '<script>alert(1)</script>'}).get_data(as_text=True)
     assert '<script>alert(1)' not in html

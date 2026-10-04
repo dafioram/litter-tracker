@@ -11,7 +11,6 @@ import secrets
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from markupsafe import escape
 from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response
 
 app = Flask(__name__)
@@ -215,6 +214,38 @@ def csv_time_to_local(dt):
     if LOCAL_TZ:
         return dt.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ).replace(tzinfo=None)
     return dt - timedelta(hours=TIMEZONE_OFFSET)
+
+# --- DATE RANGES ---
+RANGE_PRESETS = {'30': 30, '90': 90, '180': 180, '365': 365}
+
+def date_range_from_args(args, default='90'):
+    """
+    Reads ?range=30|90|180|365|all|custom (&start=&end= for custom, YYYY-MM-DD).
+    Returns a dict with the chosen preset, display dates, and SQL bounds
+    (sql_start inclusive, sql_end exclusive) for filtering on timestamp.
+    """
+    today = datetime.now().date()
+    preset = args.get('range', default)
+    start = end = None
+    if preset == 'custom':
+        try:
+            start = datetime.strptime(args.get('start', ''), '%Y-%m-%d').date()
+            end = datetime.strptime(args.get('end', ''), '%Y-%m-%d').date()
+        except ValueError:
+            start = end = None
+        if not start or start > end: preset = default
+    if preset == 'all':
+        start, end = None, today
+    elif preset != 'custom':
+        if preset not in RANGE_PRESETS: preset = default
+        start, end = today - timedelta(days=RANGE_PRESETS[preset]), today
+    return {
+        'preset': preset,
+        'start': start.isoformat() if start else '',
+        'end': end.isoformat(),
+        'sql_start': start.isoformat() if start else '0000-00-00',
+        'sql_end': (end + timedelta(days=1)).isoformat(),
+    }
 
 # --- DWELL TIME ---
 def compute_dwell_times(df, manual):
@@ -495,12 +526,13 @@ def analysis():
     colors['Unknown'] = "#999999"
     colors['System'] = "#ffcd56"
     
-    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(one_year_ago,))
+    date_range = date_range_from_args(request.args, default='365')
+    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity != 'Error' AND timestamp >= ? AND timestamp < ? ORDER BY timestamp ASC",
+                           conn, params=(date_range['sql_start'], date_range['sql_end']))
     manual_dwell = load_manual_dwell(conn)
     conn.close()
 
-    if df.empty: return render_template('analysis.html', weight_data='null', scatter_data='null', machine_data='null', dwell_data='null', freq_data='null', dwell_pending=0)
+    if df.empty: return render_template('analysis.html', weight_data='null', scatter_data='null', machine_data='null', dwell_data='null', freq_data='null', dwell_pending=0, date_range=date_range)
 
     df['dt'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
 
@@ -583,7 +615,7 @@ def analysis():
         if sum(daily_counts) > 0:
             freq_data["datasets"].append({"label": cat, "data": daily_counts, "backgroundColor": colors.get(cat, "#333")})
 
-    return render_template('analysis.html', weight_data=js_json(weight_data), scatter_data=js_json(scatter_data), machine_data=js_json(machine_data), dwell_data=js_json(dwell_data), freq_data=js_json(freq_data), dwell_pending=dwell_pending)
+    return render_template('analysis.html', weight_data=js_json(weight_data), scatter_data=js_json(scatter_data), machine_data=js_json(machine_data), dwell_data=js_json(dwell_data), freq_data=js_json(freq_data), dwell_pending=dwell_pending, date_range=date_range)
 
 @app.route('/dwell', methods=['GET', 'POST'])
 def dwell():
@@ -852,12 +884,11 @@ def report():
             else: age_str = f"{months} months"
         except: pass
 
-    # 3. Fetch Data (Extended to 365 days to ensure data shows up)
-    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity = ? AND timestamp >= ? ORDER BY timestamp ASC", conn, params=(cat_id, start_date))
+    # 3. Fetch Data for the selected period
+    date_range = date_range_from_args(request.args, default='90')
+    df = pd.read_sql_query("SELECT * FROM usage_logs WHERE cat_identity = ? AND timestamp >= ? AND timestamp < ? ORDER BY timestamp ASC",
+                           conn, params=(cat_id, date_range['sql_start'], date_range['sql_end']))
     conn.close()
-    
-    if df.empty: return f"<h3>No data found for {escape(cat_id)} in the last year.</h3>"
 
     df['dt'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S')
     
@@ -869,9 +900,8 @@ def report():
     if not valid_weights.empty:
         stats["current_weight"] = f"{valid_weights.iloc[-1]['weight']} lbs"
 
-    # Visits (Last 30 days only for frequency accuracy)
-    thirty_days_ago = datetime.now() - timedelta(days=30)
-    recent_df = df[df['dt'] >= thirty_days_ago].copy()
+    # Visits per day over the selected period
+    recent_df = df.copy()
     
     daily_visits = {}
     if not recent_df.empty:
@@ -887,8 +917,10 @@ def report():
             daily_visits[day] = visits
             total_visits += visits
         
-        days_tracked = max(1, (datetime.now() - recent_df.iloc[0]['dt']).days + 1)
-        stats["avg_visits"] = round(total_visits / min(days_tracked, 30), 1)
+        # Average over the days covered: from the period start (or first record, if later) to the period end
+        first_day = max(date_range['start'], days[0]) if date_range['start'] else days[0]
+        days_tracked = (datetime.strptime(date_range['end'], '%Y-%m-%d') - datetime.strptime(first_day, '%Y-%m-%d')).days + 1
+        stats["avg_visits"] = round(total_visits / max(1, days_tracked), 1)
 
     # 5. Chart Prep
     weight_data = [{'x': str(row['timestamp']).replace(" ", "T"), 'y': row['weight']} for _, row in valid_weights.iterrows()]
@@ -904,6 +936,8 @@ def report():
                            freq_labels=js_json(freq_labels), 
                            freq_values=js_json(freq_values), 
                            flags=flags, 
+                           has_data=not df.empty,
+                           date_range=date_range,
                            generated_date=datetime.now().strftime('%b %d, %Y'))
 
 if __name__ == '__main__':

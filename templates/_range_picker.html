@@ -1,0 +1,19 @@
+{# Date range picker. Expects date_range from date_range_from_args(); extra hidden fields via range_hidden (dict). #}
+<form method="get" class="no-print range-picker" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:0.9em;">
+    {% for name, value in (range_hidden or {}).items() %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
+    <label for="range-select">Period:</label>
+    <select id="range-select" name="range" style="padding:4px;"
+            onchange="this.form.querySelector('.custom-dates').style.display = this.value === 'custom' ? 'flex' : 'none'; if (this.value !== 'custom') this.form.submit();">
+        {% for value, label in [('30', 'Last 30 days'), ('90', 'Last 90 days'), ('180', 'Last 6 months'), ('365', 'Last year'), ('all', 'All time'), ('custom', 'Custom…')] %}
+        <option value="{{ value }}" {{ 'selected' if date_range.preset == value }}>{{ label }}</option>
+        {% endfor %}
+    </select>
+    <span class="custom-dates" style="display:{{ 'flex' if date_range.preset == 'custom' else 'none' }}; gap:6px; align-items:center;">
+        <input type="date" name="start" value="{{ date_range.start }}" style="padding:3px;">
+        to
+        <input type="date" name="end" value="{{ date_range.end }}" style="padding:3px;">
+        <button type="submit" class="btn btn-blue">Apply</button>
+    </span>
+</form>

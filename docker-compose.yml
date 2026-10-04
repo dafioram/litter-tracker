@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-5000}:5000"
+    # Passes SECRET_KEY, TIMEZONE, etc. from .env into the container
+    env_file: .env
     volumes:
       # Persists DB and Backups outside container
       # LEFT SIDE: Your computer (Current folder/data)

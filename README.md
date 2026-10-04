@@ -48,7 +48,10 @@ cp .env.example .env
 
 **Recommended `.env` settings:**
 
-* `TIMEZONE_OFFSET`: Set this to match your local time (e.g., `5` for EST). The CSV data is in UTC, so this corrects the charts to your wall-clock time.
+* `TIMEZONE`: Your IANA time zone (e.g., `America/New_York`). If your CSV times are UTC, this converts them to your wall-clock time, including daylight saving.
+* `TIMEZONE_OFFSET`: Fixed-hour fallback used when `TIMEZONE` is empty. Set `TIMEZONE=` and `TIMEZONE_OFFSET=0` if your CSV times already match the Whisker app.
+
+To tell which applies, compare the newest row of your CSV with the newest entry in the Whisker app's History screen. Changing these settings only affects future imports.
 * `PORT`: Default is 5000. Change this if you want to access the dashboard on a different port.
 
 ### 3. Run the App
